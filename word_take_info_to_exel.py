@@ -1,5 +1,6 @@
 import docx
 import pandas as pd
+from openpyxl import load_workbook
 import os
 import glob
 import re
@@ -12,25 +13,8 @@ def get_text(docx_path):
 def extract_meeting_info(text):
     def extract_after(label, text, multiline=False):
         pattern = rf"{re.escape(label)}\s*(.*)"
-        if multiline:
-            # Get all lines after the label until a blank line or next label
-            lines = text.split('\n')
-            start = None
-            for i, line in enumerate(lines):
-                if line.strip().startswith(label):
-                    start = i + 1
-                    break
-            if start is not None:
-                values = []
-                for line in lines[start:]:
-                    if not line.strip() or ':' in line:
-                        break
-                    values.append(line.strip())
-                return values
-            return []
-        else:
-            m = re.search(pattern, text)
-            return m.group(1).strip() if m else ''
+        m = re.search(pattern, text)
+        return m.group(1).strip() if m else ''
     
     info = {}
     info['Голова комітету'] = extract_after('Голова комітету:', text)
@@ -40,26 +24,24 @@ def extract_meeting_info(text):
     info['Запрошені'] = extract_after('Запрошені:', text)
     info['Кворум'] = extract_after('Кворум:', text)
     info['Порядок прийняття рішень'] = extract_after('Порядок прийняття рішень:', text)
-    # Agenda
-    agenda_match = re.search(r'ПОРЯДОК ДЕННИЙ:(.*?)Питання', text, re.DOTALL)
-    if agenda_match:
-        agenda = [line.strip(" .\t") for line in agenda_match.group(1).split('\n') if line.strip()]
-        info['ПОРЯДОК ДЕННИЙ'] = " | ".join(agenda)
-    else:
-        info['ПОРЯДОК ДЕННИЙ'] = ''
+    
     # Members
-    members = extract_after('Члени комітету:', text, multiline=True)
+    members = extract_after('Члени комітету:', text)
     info['Члени комітету'] = members
+    print(f"G : {info['Голова комітету']}")
     return info
 
 def extract_questions(text):
-    # Find all "Питання N:" blocks
     questions = []
-    for match in re.finditer(r'Питання\s*\d+:(.*?)(?=Питання\s*\d+:|ПІБ|\Z)', text, re.DOTALL):
+    # Extract agenda topics
+    agenda_match = re.search(r'ПОРЯДОК ДЕННИЙ:(.*?)(?:Питання 1:|$)', text, re.DOTALL)
+    agenda = []
+    if agenda_match:
+        agenda = [line.strip(" .\t") for line in agenda_match.group(1).split('\n') if line.strip()]
+    # Find all "Питання N:" blocks
+    question_blocks = list(re.finditer(r'Питання\s*\d+:(.*?)(?=Питання\s*\d+:|ПІБ|\Z)', text, re.DOTALL))
+    for idx, match in enumerate(question_blocks):
         block = match.group(1)
-        # Agenda item
-        agenda_match = re.search(r'^\s*(.*?)\n', block)
-        agenda = agenda_match.group(1).strip() if agenda_match else ''
         # Speaker
         speaker_match = re.search(r'Виступив:([^\n]*)', block)
         speaker = speaker_match.group(1).strip() if speaker_match else ''
@@ -74,8 +56,13 @@ def extract_questions(text):
         # Decision
         decision_match = re.search(r'Вирішили:(.*)', block)
         decision = decision_match.group(1).strip() if decision_match else ''
+        # Use agenda topic if available, else fallback to first line
+        if idx < len(agenda):
+            question_text = agenda[idx]
+        else:
+            question_text = block.split('\n')[0].strip()
         questions.append({
-            'agenda': agenda,
+            'question text': question_text,
             'speaker': speaker,
             'votes': votes,
             'decision': decision
@@ -174,7 +161,7 @@ if __name__ == "__main__":
                 'Запрошені': info['Запрошені'],
                 'Кворум': info['Кворум'],
                 'Порядок прийняття рішень': info['Порядок прийняття рішень'],
-                'ПОРЯДОК ДЕННИЙ': q['agenda'],
+                'ПОРЯДОК ДЕННИЙ': q['question text'],
                 'Виступив:': q['speaker'],
                 'Голосували: за': q['votes']['за'],
                 'Голосували: проти': q['votes']['проти'],
@@ -200,4 +187,15 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(all_rows)
     df.to_excel('extracted_info_flat.xlsx', index=False)
+    
+    wb = load_workbook('extracted_info_flat.xlsx')
+    ws = wb.active
+    
+    for column_cells in ws.columns:
+        length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
+        col_letter = column_cells[0].column_letter
+        ws.column_dimensions[col_letter].width = length + 2  # +2 для відступу
+
+    wb.save('extracted_info_flat.xlsx')
+    
     print("Extraction complete. Results saved to extracted_info_flat.xlsx.")
