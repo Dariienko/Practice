@@ -10,25 +10,60 @@ def get_text(docx_path):
     doc = docx.Document(docx_path)
     return "\n".join([p.text for p in doc.paragraphs])
 
-def extract_meeting_info(text):
+def extract_tables(docx_path):
+    """
+    Extract all tables from a Word file as lists of lists (rows of cells).
+    Returns a list of tables, each table is a list of rows, each row is a list of cell texts.
+    """
+    doc = docx.Document(docx_path)
+    tables = []
+    for table in doc.tables:
+        table_data = []
+        for row in table.rows:
+            row_data = [cell.text.strip() for cell in row.cells]
+            table_data.append(row_data)
+        tables.append(table_data)
+    return tables
+
+def extract_meeting_info(text, tables=None):
     def extract_after(label, text, multiline=False):
         pattern = rf"{re.escape(label)}\s*(.*)"
         m = re.search(pattern, text)
         return m.group(1).strip() if m else ''
-    
     info = {}
-    info['Голова комітету'] = extract_after('Голова комітету:', text)
-    info['Заступник Голови комітету'] = extract_after('Заступник Голови комітету:', text)
-    info['Секретар комітету'] = extract_after('Секретар комітету (без права голосу):', text)
+    # If tables are provided, extract from the first table
+    if tables and len(tables) > 0:
+        table = tables[0]
+        def get_cells_below(keyword):
+            values = []
+            found = False
+            for row in table:
+                if found:
+                    if row[0].strip().endswith(":") and row[0].strip() != keyword:
+                        break
+                    if row[0].strip() and row[0].strip() != keyword and not row[0].strip().endswith(":"):
+                        values.append(row[0].strip())
+                    if len(row) > 1 and row[1].strip():
+                        values.append(row[1].strip())
+                if row[0].strip() == keyword:
+                    found = True
+            return values
+        info['Голова комітету'] = ", ".join(get_cells_below('Голова комітету:'))
+        info['Заступник Голови комітету'] = ", ".join(get_cells_below('Заступник Голови комітету:'))
+        info['Секретар комітету'] = ", ".join(get_cells_below('Секретар комітету (без права голосу):'))
+        info['Члени комітету'] = get_cells_below('Члени комітету:')  # keep as list for correct display
+    else:
+        # fallback to text extraction
+        info['Голова комітету'] = extract_after('Голова комітету:', text)
+        info['Заступник Голови комітету'] = extract_after('Заступник Голови комітету:', text)
+        info['Секретар комітету'] = extract_after('Секретар комітету (без права голосу):', text)
+        members = extract_after('Члени комітету:', text)
+        info['Члени комітету'] = [members] if members else []
+        
     info['Відсутні'] = extract_after('Відсутні:', text)
     info['Запрошені'] = extract_after('Запрошені:', text)
     info['Кворум'] = extract_after('Кворум:', text)
     info['Порядок прийняття рішень'] = extract_after('Порядок прийняття рішень:', text)
-    
-    # Members
-    members = extract_after('Члени комітету:', text)
-    info['Члени комітету'] = members
-    print(f"G : {info['Голова комітету']}")
     return info
 
 def extract_questions(text):
@@ -56,6 +91,7 @@ def extract_questions(text):
         # Decision
         decision_match = re.search(r'Вирішили:(.*)', block)
         decision = decision_match.group(1).strip() if decision_match else ''
+        
         # Use agenda topic if available, else fallback to first line
         if idx < len(agenda):
             question_text = agenda[idx]
@@ -139,11 +175,13 @@ if __name__ == "__main__":
     for file_path in file_list:
         filename = os.path.basename(file_path)
         text = get_text(file_path)
-        info = extract_meeting_info(text)
+        tables = extract_tables(file_path)
+        info = extract_meeting_info(text, tables)
         questions = extract_questions(text)
         vote_table = extract_vote_table(text)
         number, date = extract_doc_number_and_date(text)
-        with open("test_output.txt", "w", encoding="utf-8") as file:
+        
+        with open("text_output.txt", "w", encoding="utf-8") as file:
             file.write(text)
         # For each agenda item (Питання), create a block of rows
         for q_idx, q in enumerate(questions):
@@ -152,10 +190,10 @@ if __name__ == "__main__":
             meeting_row = {
                 'Файл': filename,
                 'Дата': date,
-                'Номер': number,
+                'Номер протоколу': number,
                 'Голова комітету': info['Голова комітету'],
                 'Заступник Голови комітету': info['Заступник Голови комітету'],
-                'Члени комітету': info['Члени комітету'][0] if info['Члени комітету'] else np.nan,
+                'Члени комітету': ", ".join(info['Члени комітету']) if isinstance(info['Члени комітету'], list) else info['Члени комітету'],
                 'Секретар комітету': info['Секретар комітету'],
                 'Відсутні': info['Відсутні'],
                 'Запрошені': info['Запрошені'],
@@ -174,7 +212,6 @@ if __name__ == "__main__":
                 'примітка': first_member['примітка']
             }
             all_rows.append(meeting_row)
-            # Next rows: for each additional member
             for member in vote_table[1:]:
                 member_row = {k: np.nan for k in meeting_row}
                 member_row['Члени комітету'] = member['ПІБ']
@@ -185,17 +222,32 @@ if __name__ == "__main__":
                 member_row['примітка'] = member['примітка']
                 all_rows.append(member_row)
 
-    df = pd.DataFrame(all_rows)
-    df.to_excel('extracted_info_flat.xlsx', index=False)
+        # Process the last table and add its rows to all_rows, mapping columns by header if possible
+        if tables:
+            last_table = tables[-1]
+            if last_table:
+                headers = last_table[0]
+                for row in last_table[1:]:
+                    row_dict = {}
+                    for i, header in enumerate(headers):
+                        if i < len(row):
+                            row_dict[header] = row[i]
+                        else:
+                            row_dict[header] = ""
+                    all_rows.append(row_dict)
     
-    wb = load_workbook('extracted_info_flat.xlsx')
+    # Create a DataFrame and save to Excel
+    df = pd.DataFrame(all_rows)
+    df.to_excel('TOTAL_PROTOKOL.xlsx', index=False)
+    
+    wb = load_workbook('TOTAL_PROTOKOL.xlsx')
     ws = wb.active
     
     for column_cells in ws.columns:
         length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
         col_letter = column_cells[0].column_letter
-        ws.column_dimensions[col_letter].width = length + 2  # +2 для відступу
+        ws.column_dimensions[col_letter].width = length + 2
 
-    wb.save('extracted_info_flat.xlsx')
+    wb.save('TOTAL_PROTOKOL.xlsx')
     
-    print("Extraction complete. Results saved to extracted_info_flat.xlsx.")
+    print("Extraction complete. Results saved to TOTAL_PROTOKOL.xlsx.")
