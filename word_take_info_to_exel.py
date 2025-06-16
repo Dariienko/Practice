@@ -78,7 +78,7 @@ def extract_questions(text):
     for idx, match in enumerate(question_blocks):
         block = match.group(1)
         # Speaker
-        speaker_match = re.search(r'Виступив:([^\n]*)', block)
+        speaker_match = re.search(r'Виступив:(.*?)Голосували:', block, re.DOTALL)
         speaker = speaker_match.group(1).strip() if speaker_match else ''
         # Votes
         votes_match = re.search(r'Голосували:(.*?)Вирішили:', block, re.DOTALL)
