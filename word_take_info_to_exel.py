@@ -51,7 +51,7 @@ def extract_meeting_info(text, tables=None):
         info['Голова комітету'] = ", ".join(get_cells_below('Голова комітету:'))
         info['Заступник Голови комітету'] = ", ".join(get_cells_below('Заступник Голови комітету:'))
         info['Секретар комітету'] = ", ".join(get_cells_below('Секретар комітету (без права голосу):'))
-        info['Члени комітету'] = get_cells_below('Члени комітету:')  # keep as list for correct display
+        info['Члени комітету'] = get_cells_below('Члени комітету:')
     else:
         # fallback to text extraction
         info['Голова комітету'] = extract_after('Голова комітету:', text)
@@ -85,7 +85,7 @@ def extract_questions(text):
         votes = {'за': '', 'проти': '', 'утримались': ''}
         if votes_match:
             for v in votes:
-                m = re.search(rf'{v}\s*-\s*(\d+)', votes_match.group(1))
+                m = re.search(rf'{v}\s*-\s*(\S+)', votes_match.group(1))
                 if m:
                     votes[v] = m.group(1)
         # Decision
@@ -144,8 +144,8 @@ def extract_vote_table(text):
 
 def extract_doc_number_and_date(text):
     # Extract document number (handles underscores and spaces)
-    number_match = re.search(r'ПРОТОКОЛ\s*№\s*_?(\d+)_?', text, re.IGNORECASE)
-    number = number_match.group(1) if number_match else ''
+    number_match = re.search(r'ПРОТОКОЛ\s*№\s*_*(\S+)_*', text, re.IGNORECASE)
+    number = number_match.group(1).strip('_') if number_match else ''
     # Extract date (handles underscores, spaces, and Ukrainian months)
     date_match = re.search(
         r'«\s*_?(\d{1,2})_?\s*»\s*_+([а-яА-Яіїєґ]+)_+\s*(\d{4})\s*року', text)
@@ -181,12 +181,10 @@ if __name__ == "__main__":
         vote_table = extract_vote_table(text)
         number, date = extract_doc_number_and_date(text)
         
-        with open("text_output.txt", "w", encoding="utf-8") as file:
-            file.write(text)
         # For each agenda item (Питання), create a block of rows
         for q_idx, q in enumerate(questions):
             # First row: meeting info + first member
-            first_member = vote_table[0] if vote_table else {'ПІБ': np.nan, 'за': '', 'проти': '', 'утримались': '', 'примітка': ''}
+            first_member = vote_table[0] if vote_table else {'ПІБ': '', 'за': '', 'проти': '', 'утримались': '', 'примітка': ''}
             meeting_row = {
                 'Файл': filename,
                 'Дата': date,
@@ -251,3 +249,4 @@ if __name__ == "__main__":
     wb.save('TOTAL_PROTOKOL.xlsx')
     
     print("Extraction complete. Results saved to TOTAL_PROTOKOL.xlsx.")
+    input("Press Enter to exit...")

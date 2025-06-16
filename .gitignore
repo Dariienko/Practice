@@ -1,5 +1,6 @@
 # DATA / TEMPLATES / CONFIGURATION
-
+*.ini
 *.xlsx
 *.docx
 *.txt
+!requirements.txt
