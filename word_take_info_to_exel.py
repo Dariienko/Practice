@@ -52,13 +52,6 @@ def extract_meeting_info(text, tables=None):
         info['Заступник Голови комітету'] = ", ".join(get_cells_below('Заступник Голови комітету:'))
         info['Секретар комітету'] = ", ".join(get_cells_below('Секретар комітету (без права голосу):'))
         info['Члени комітету'] = get_cells_below('Члени комітету:')
-    else:
-        # fallback to text extraction
-        info['Голова комітету'] = extract_after('Голова комітету:', text)
-        info['Заступник Голови комітету'] = extract_after('Заступник Голови комітету:', text)
-        info['Секретар комітету'] = extract_after('Секретар комітету (без права голосу):', text)
-        members = extract_after('Члени комітету:', text)
-        info['Члени комітету'] = [members] if members else []
         
     info['Відсутні'] = extract_after('Відсутні:', text)
     info['Запрошені'] = extract_after('Запрошені:', text)
